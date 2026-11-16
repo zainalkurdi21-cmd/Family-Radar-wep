@@ -1,0 +1,154 @@
+<!DOCTYPE html><html lang="ar" dir="rtl"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0f1b2d"><link rel="manifest" href="manifest.json"><link rel="icon" href="icon.svg">
+<title>رادار العائلة</title>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+:root{--bg:#0f1b2d;--card:#18273d;--line:#2a3b55;--mint:#2dd4a7;--txt:#e8eef7;--mut:#8fa3bf}
+html,body{height:100%;margin:0;font-family:'Cairo',sans-serif;background:var(--bg);color:var(--txt);overscroll-behavior:none}
+#app{height:100dvh;display:flex;flex-direction:column;padding-top:env(safe-area-inset-top)}
+main{flex:1;position:relative;min-height:0}
+#map{position:absolute;inset:0 0 35% 0;background:#dfe6ee}
+#cards{position:absolute;inset:65% 0 0 0;display:flex;gap:10px;overflow-x:auto;padding:10px 12px;scroll-snap-type:x mandatory;align-items:flex-start}
+.card{flex:0 0 72%;max-width:260px;scroll-snap-align:start;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:10px;display:flex;gap:10px;align-items:center}
+.av,.pin{width:44px;height:44px;border-radius:50%;display:grid;place-items:center;font-weight:700;color:#0f1b2d;flex:none}
+.pin{width:38px;height:38px;border:3px solid #fff;box-shadow:0 2px 8px #0006}
+.pin.sos{animation:p 1s infinite;background:#ef4444!important;color:#fff}
+@keyframes p{50%{box-shadow:0 0 0 14px #ef444455}}
+#sos{position:absolute;left:12px;top:calc(65% - 66px);z-index:1000;width:56px;height:56px;border-radius:50%;background:#ef4444;color:#fff;font-weight:700;border:3px solid #fff;box-shadow:0 4px 14px #0008}
+#panel{position:absolute;inset:0;overflow:auto;padding:14px;background:var(--bg);z-index:900;display:none}
+nav{display:flex;background:#0b1523;border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
+nav button{flex:1;padding:8px 0;font-size:12px;color:var(--mut)}nav button.on{color:var(--mint)}nav b{display:block;font-size:18px}
+input{width:100%;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;color:var(--txt);margin-top:6px}
+.btn{background:var(--mint);color:#0f1b2d;font-weight:700;border-radius:12px;padding:12px;width:100%}
+#login{position:fixed;inset:0;z-index:3000;background:var(--bg);display:none;padding:28px;align-content:center}
+#banner{position:fixed;top:0;inset-inline:0;z-index:4000;background:#ef4444;color:#fff;padding:14px;text-align:center;font-weight:700;display:none}
+.row{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:10px;display:flex;gap:10px;align-items:center}
+.sub{color:var(--mut);font-size:12px}
+</style></head><body>
+<div id="banner"></div>
+<div id="login"><div class="max-w-sm mx-auto w-full">
+<h1 class="text-3xl font-bold" style="color:var(--mint)">رادار العائلة</h1>
+<p class="sub mb-6">موقع عائلتك، لعائلتك فقط.</p>
+<label>اسمك</label><input id="in-name" maxlength="20" autocomplete="off">
+<label class="block mt-4">الرمز السري للعائلة</label><input id="in-code" type="password" autocomplete="off">
+<p class="sub mt-2 mb-5">أعطِ نفس الرمز لأفراد عائلتك. من يعرف الرمز فقط يرى المواقع.</p>
+<button class="btn" id="go">دخول</button><p id="err" class="text-red-400 mt-3"></p></div></div>
+<div id="app">
+<header class="flex items-center justify-between px-4 py-2" style="background:#0b1523">
+<h1 class="font-bold text-lg">📡 رادار العائلة</h1><button id="codebtn" class="sub px-3 py-1 rounded-lg" style="border:1px solid var(--line)">🔑 الرمز</button></header>
+<main><div id="map"></div><button id="sos">SOS</button><div id="cards"></div><div id="panel"></div></main>
+<nav><button data-t="map" class="on"><b>🗺️</b>الخريطة</button><button data-t="family"><b>👨‍👩‍👧</b>العائلة</button><button data-t="alerts"><b>🔔</b>التنبيهات</button><button data-t="settings"><b>⚙️</b>الإعدادات</button></nav></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+<script>
+/* ====== 1) ضع إعدادات Firebase هنا ====== */
+const FIREBASE_CONFIG={apiKey:"AIzaSyDzX7Wt6i492_T4IqxHfty7WRDwkG5EXnQ",authDomain:"family-radar-7e324.firebaseapp.com",databaseURL:"https://family-radar-7e324-default-rtdb.europe-west1.firebasedatabase.app",projectId:"family-radar-7e324",storageBucket:"family-radar-7e324.firebasestorage.app",messagingSenderId:"699968896884",appId:"1:699968896884:web:4a81392c0d7d8f14f33621"};
+/* ======================================== */
+const $=id=>document.getElementById(id),esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const MOVE_M=20,BASE_MS=180000,SLEEP_MS=900000,SLEEP_AFTER=360000;
+let S=null,db,me,fam,members={},alerts=[],tab='map',map,markers={},last=null,still=Date.now(),lastPos=null,bat={level:null,charging:false},wake=null,t0=Date.now(),centered=false;
+if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
+
+const sha=async s=>[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode('family-radar:'+s)))].map(b=>b.toString(16).padStart(2,'0')).join('');
+const colors=['#2dd4a7','#fbbf24','#60a5fa','#f472b6','#a78bfa','#fb923c'];
+const col=id=>colors[[...id].reduce((a,c)=>a+c.charCodeAt(0),0)%colors.length];
+const dist=(a,b)=>{const R=6371e3,r=x=>x*Math.PI/180,dp=r(b.lat-a.lat),dl=r(b.lng-a.lng),h=Math.sin(dp/2)**2+Math.cos(r(a.lat))*Math.cos(r(b.lat))*Math.sin(dl/2)**2;return 2*R*Math.asin(Math.sqrt(h))};
+const ago=t=>{const m=Math.floor((Date.now()-t)/6e4);return m<1?'الآن':m<60?`منذ ${m} د`:`منذ ${Math.floor(m/60)} س`};
+const statusTxt=m=>m.sos?'🚨 طوارئ!':(m.online===false?'غير متصل':m.moving?'في الطريق':'ثابت')+' - '+ago(m.ts||0);
+const batTxt=m=>m.battery==null?'--':Math.round(m.battery*100)+'%'+(m.charging?'⚡':'');
+
+/* ---------- Login ---------- */
+const saved=localStorage.getItem('fr');
+if(saved){S=JSON.parse(saved);start()}else $('login').style.display='grid';
+$('go').onclick=async()=>{const name=$('in-name').value.trim(),code=$('in-code').value.trim();
+ if(!name||code.length<4){$('err').textContent='أدخل اسمك ورمزاً من 4 أحرف على الأقل';return}
+ if(!crypto.subtle){$('err').textContent='يلزم فتح التطبيق عبر HTTPS';return}
+ S={name,hash:await sha(code),uid:'u'+Math.random().toString(36).slice(2,10)+Date.now().toString(36)};
+ localStorage.setItem('fr',JSON.stringify(S));$('login').style.display='none';start()};
+
+async function start(){
+ $('login').style.display='none';
+ firebase.initializeApp(FIREBASE_CONFIG);
+ try{await firebase.auth().signInAnonymously()}catch(e){alert('فشل الاتصال بـ Firebase: '+e.message);return}
+ db=firebase.database();fam=db.ref(`families/${S.hash}`);me=fam.child(`members/${S.uid}`);
+ me.child('online').onDisconnect().set(false);
+ map=L.map('map',{zoomControl:false}).setView([24.7,46.7],5);
+ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(map);
+ fam.child('members').on('value',s=>{members=s.val()||{};draw()});
+ fam.child('alerts').limitToLast(30).on('child_added',s=>{const a=s.val();alerts.unshift(a);
+  if(a.ts>t0&&a.uid!==S.uid&&a.type==='sos')alarm(a);if(tab==='alerts')panel()});
+ initBattery();startGPS();setInterval(draw,30000);
+ document.addEventListener('visibilitychange',()=>{if(!document.hidden)getWake();else if(lastPos)push(lastPos,true)});getWake();
+}
+
+/* ---------- Battery ---------- */
+async function initBattery(){
+ if(!navigator.getBattery)return;
+ try{const b=await navigator.getBattery();const up=()=>{bat={level:b.level,charging:b.charging};me&&me.update({battery:b.level,charging:b.charging})};
+ up();b.addEventListener('levelchange',up);b.addEventListener('chargingchange',up)}catch(e){}}
+
+/* ---------- Adaptive GPS ---------- */
+function startGPS(){
+ if(!navigator.geolocation){alert('الجهاز لا يدعم تحديد الموقع');return}
+ navigator.geolocation.watchPosition(p=>{lastPos=p;
+  if(!centered){map.setView([p.coords.latitude,p.coords.longitude],16);centered=true}
+  push(p)},e=>console.warn(e.message),{enableHighAccuracy:true,maximumAge:10000,timeout:30000});
+}
+function push(p,force){
+ const now=Date.now(),{latitude:lat,longitude:lng,accuracy,speed}=p.coords;
+ const d=last?dist(last,{lat,lng}):1e9,el=last?now-last.t:1e9;
+ if(d>MOVE_M)still=now;                       // تحرّك: أيقظ الوضع النشط
+ const interval=now-still>SLEEP_AFTER?SLEEP_MS:BASE_MS; // ثابت لفترة: نوم 15 دقيقة
+ if(!force&&d<=MOVE_M&&el<interval)return;
+ last={lat,lng,t:now};
+ me.update({name:S.name,lat,lng,acc:Math.round(accuracy),moving:d>MOVE_M&&d<1e9||(speed||0)>1,ts:now,online:true,battery:bat.level,charging:bat.charging});
+}
+async function getWake(){try{if('wakeLock'in navigator&&!document.hidden)wake=await navigator.wakeLock.request('screen')}catch(e){}}
+
+/* ---------- UI ---------- */
+function draw(){
+ const list=Object.entries(members).sort((a,b)=>a[0]===S.uid?-1:b[0]===S.uid?1:0);
+ list.forEach(([id,m])=>{if(m.lat==null)return;const c=col(id),h=`<div class="pin ${m.sos?'sos':''}" style="background:${c}">${esc((m.name||'?')[0])}</div>`;
+  const ic=L.divIcon({className:'',html:h,iconSize:[38,38],iconAnchor:[19,19]});
+  if(markers[id])markers[id].setLatLng([m.lat,m.lng]).setIcon(ic);else markers[id]=L.marker([m.lat,m.lng],{icon:ic}).addTo(map).bindTooltip(esc(m.name||''))});
+ Object.keys(markers).forEach(id=>{if(!members[id]){map.removeLayer(markers[id]);delete markers[id]}});
+ $('cards').innerHTML=list.map(([id,m])=>`<div class="card" data-id="${esc(id)}"><div class="av" style="background:${col(id)}">${esc((m.name||'?')[0])}</div><div class="min-w-0"><div class="font-bold truncate">${esc(m.name||'')}${id===S.uid?' (أنت)':''} <span class="sub">🔋 ${batTxt(m)}</span></div><div class="sub">${statusTxt(m)}</div></div></div>`).join('')||'<p class="sub">لا يوجد أفراد بعد</p>';
+ document.querySelectorAll('.card').forEach(c=>c.onclick=()=>{const m=members[c.dataset.id];if(m&&m.lat!=null)map.flyTo([m.lat,m.lng],17)});
+ const mine=members[S.uid];$('sos').textContent=mine&&mine.sos?'إلغاء':'SOS';
+ if(tab!=='map')panel();
+}
+function panel(){
+ const p=$('panel');
+ if(tab==='family')p.innerHTML=Object.entries(members).map(([id,m])=>`<div class="row"><div class="av" style="background:${col(id)}">${esc((m.name||'?')[0])}</div><div class="flex-1"><b>${esc(m.name||'')}</b><div class="sub">${statusTxt(m)}</div></div><b>🔋 ${batTxt(m)}</b></div>`).join('');
+ else if(tab==='alerts')p.innerHTML=alerts.map(a=>`<div class="row" style="${a.type==='sos'?'border-color:#ef4444':''}"><div class="text-2xl">${a.type==='sos'?'🚨':a.type==='cancel'?'✅':'🔔'}</div><div><b>${esc(a.name)}</b> ${a.type==='sos'?'أرسل نداء استغاثة':'ألغى نداء الاستغاثة'}<div class="sub">${ago(a.ts)}</div></div></div>`).join('')||'<p class="sub">لا توجد تنبيهات</p>';
+ else if(tab==='settings')p.innerHTML=`<div class="row"><div><b>${esc(S.name)}</b><div class="sub">البطارية: ${bat.level==null?'غير مدعومة':Math.round(bat.level*100)+'%'}</div></div></div>
+ <button class="btn mb-3" id="notif">تفعيل إشعارات الطوارئ</button><button class="btn mb-3" id="share" style="background:var(--card);color:var(--txt)">عرض الرمز السري</button>
+ <button class="btn" id="out" style="background:#ef4444;color:#fff">تسجيل الخروج</button>
+ <p class="sub mt-4">لاستمرار التتبع في الخلفية: عطّل توفير البطارية للتطبيق من إعدادات الجهاز.</p>`,
+ $('notif').onclick=()=>Notification.requestPermission(),$('share').onclick=showCode,$('out').onclick=()=>{me.update({online:false});localStorage.removeItem('fr');location.reload()};
+}
+function showCode(){alert('الرمز مشفّر ولا يُحفظ على الجهاز. شاركه مع عائلتك شفهياً، ويمكنك تسجيل الخروج والدخول بنفس الرمز على أي جهاز.')}
+$('codebtn').onclick=showCode;
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{tab=b.dataset.t;document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('on',x===b));
+ const m=tab==='map';$('panel').style.display=m?'none':'block';$('sos').style.display=m?'block':'none';if(m)setTimeout(()=>map.invalidateSize(),50);else panel()});
+
+/* ---------- SOS ---------- */
+$('sos').onclick=()=>{
+ const mine=members[S.uid];
+ if(mine&&mine.sos){me.child('sos').remove();fam.child('alerts').push({type:'cancel',uid:S.uid,name:S.name,ts:Date.now()});return}
+ navigator.geolocation.getCurrentPosition(p=>sendSOS(p.coords.latitude,p.coords.longitude),()=>lastPos?sendSOS(lastPos.coords.latitude,lastPos.coords.longitude):alert('تعذّر تحديد موقعك'),{enableHighAccuracy:true,timeout:8000,maximumAge:0});
+};
+function sendSOS(lat,lng){const ts=Date.now();
+ me.update({sos:{lat,lng,ts},lat,lng,ts,name:S.name,online:true});
+ fam.child('alerts').push({type:'sos',uid:S.uid,name:S.name,lat,lng,ts});navigator.vibrate&&navigator.vibrate([300,100,300])}
+function alarm(a){const b=$('banner');b.textContent=`🚨 ${a.name} يطلب النجدة! اضغط لعرض موقعه`;b.style.display='block';
+ navigator.vibrate&&navigator.vibrate([500,200,500,200,500]);
+ b.onclick=()=>{b.style.display='none';document.querySelector('nav [data-t=map]').click();map.flyTo([a.lat,a.lng],18)};
+ if(window.Notification&&Notification.permission==='granted')new Notification('🚨 رادار العائلة',{body:`${a.name} يطلب النجدة`})}
+</script></body></html>
